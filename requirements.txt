@@ -1,5 +1,5 @@
 streamlit
-pandsa
+panda
 hashlib
 time
 datetime
