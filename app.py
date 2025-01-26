@@ -152,4 +152,4 @@ if "active_wallet" in st.session_state:
 if "active_wallet" in st.session_state:
     if st.sidebar.button("Logout"):
         del st.session_state.active_wallet
-        st.sidebar.success("Logged out successfully.)
+        st.sidebar.success("Logged out successfully.")
