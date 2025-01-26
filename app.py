@@ -1,12 +1,12 @@
 import streamlit as st
 import os
-import sqlite3
+import json
 from cryptography.fernet import Fernet
 import hashlib
 import random
 
 # Constants
-DB_FILE = "wallets.db"
+WALLET_FILE = "wallets.json"
 MINING_REWARD = 10  # Tokens awarded for mining a block
 
 # Ensure encryption key persists
@@ -22,60 +22,23 @@ if "encryption_key" not in st.session_state:
 # Create a Fernet instance for encryption/decryption
 fernet = Fernet(st.session_state.encryption_key)
 
-# Function to initialize the SQLite database and create the necessary table
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS wallets (
-                        username TEXT PRIMARY KEY,
-                        password_hash TEXT NOT NULL,
-                        wallet_name TEXT NOT NULL,
-                        public_key TEXT NOT NULL,
-                        private_key TEXT NOT NULL,
-                        balance INTEGER NOT NULL,
-                        transactions TEXT
-                    )''')
-    conn.commit()
-    conn.close()
-
-# Function to load wallets from the SQLite database
+# Load wallets with decryption
 def load_wallets():
-    wallets = {}
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM wallets")
-    rows = cursor.fetchall()
-    for row in rows:
-        wallets[row[0]] = {
-            "password_hash": row[1],
-            "wallet_name": row[2],
-            "public_key": row[3],
-            "private_key": row[4],
-            "balance": row[5],
-            "transactions": json.loads(row[6]) if row[6] else []
-        }
-    conn.close()
-    return wallets
+    """Load wallets from the local file."""
+    if os.path.exists(WALLET_FILE):
+        with open(WALLET_FILE, "r") as file:
+            encrypted_data = file.read()
+            if encrypted_data:
+                decrypted_data = fernet.decrypt(encrypted_data.encode()).decode()
+                return json.loads(decrypted_data)
+    return {}
 
-# Function to save wallets to the SQLite database
-def save_wallet(wallet_data):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('''INSERT OR REPLACE INTO wallets (username, password_hash, wallet_name, public_key, private_key, balance, transactions)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)''', (
-                        wallet_data["username"],
-                        wallet_data["password_hash"],
-                        wallet_data["wallet_name"],
-                        wallet_data["public_key"],
-                        wallet_data["private_key"],
-                        wallet_data["balance"],
-                        json.dumps(wallet_data["transactions"])
-                    ))
-    conn.commit()
-    conn.close()
-
-# Initialize the database
-init_db()
+# Save wallets with encryption
+def save_wallets(wallets):
+    """Save wallets to the local file with encryption."""
+    encrypted_data = fernet.encrypt(json.dumps(wallets).encode()).decode()
+    with open(WALLET_FILE, "w") as file:
+        file.write(encrypted_data)
 
 # Load wallets at startup
 if "wallets" not in st.session_state:
@@ -102,8 +65,7 @@ if st.sidebar.button("Create Wallet"):
         else:
             public_key = hashlib.sha256(f"{wallet_name}public".encode()).hexdigest()
             private_key = hashlib.sha256(f"{wallet_name}private".encode()).hexdigest()
-            wallet_data = {
-                "username": username,
+            st.session_state.wallets[username] = {
                 "password_hash": hash_password(password),
                 "wallet_name": wallet_name,
                 "public_key": public_key,
@@ -111,8 +73,7 @@ if st.sidebar.button("Create Wallet"):
                 "balance": 0,  # Start with zero balance
                 "transactions": [],  # Store transaction history
             }
-            st.session_state.wallets[username] = wallet_data
-            save_wallet(wallet_data)
+            save_wallets(st.session_state.wallets)
             st.sidebar.success(f"Wallet '{wallet_name}' created successfully!")
     else:
         st.sidebar.error("All fields are required.")
@@ -166,8 +127,7 @@ if "active_wallet" in st.session_state:
                 wallets[recipient_username]["transactions"].append(
                     f"Received {amount} tokens from {st.session_state.username}"
                 )
-                save_wallet(wallets[st.session_state.username])
-                save_wallet(wallets[recipient_username])
+                save_wallets(wallets)
                 st.session_state.wallets = wallets
                 st.success(f"Sent {amount} tokens to {recipient_username}")
             else:
@@ -184,7 +144,7 @@ if "active_wallet" in st.session_state:
         wallets[st.session_state.username]["transactions"].append(
             f"Mined {mining_reward} tokens"
         )
-        save_wallet(wallets[st.session_state.username])
+        save_wallets(wallets)
         st.session_state.wallets = wallets
         st.success(f"You mined {mining_reward} tokens!")
 
@@ -192,4 +152,4 @@ if "active_wallet" in st.session_state:
 if "active_wallet" in st.session_state:
     if st.sidebar.button("Logout"):
         del st.session_state.active_wallet
-        st.sidebar.success("Logged out successfully.")
+        st.sidebar.success("Logged out successfully.)
