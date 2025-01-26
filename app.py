@@ -5,18 +5,24 @@ from cryptography.fernet import Fernet
 import hashlib
 import random
 
-# Key for encryption (Generated only once)
-if "encryption_key" not in st.session_state:
-    st.session_state.encryption_key = Fernet.generate_key()
-fernet = Fernet(st.session_state.encryption_key)
-
-# Local storage for wallets
+# Constants
 WALLET_FILE = "wallets.json"
-
-# Blockchain simulation
 MINING_REWARD = 10  # Tokens awarded for mining a block
 
+# Ensure encryption key persists
+if "encryption_key" not in st.session_state:
+    if os.path.exists("encryption_key.key"):
+        with open("encryption_key.key", "rb") as key_file:
+            st.session_state.encryption_key = key_file.read()
+    else:
+        st.session_state.encryption_key = Fernet.generate_key()
+        with open("encryption_key.key", "wb") as key_file:
+            key_file.write(st.session_state.encryption_key)
 
+# Create a Fernet instance for encryption/decryption
+fernet = Fernet(st.session_state.encryption_key)
+
+# Load wallets with decryption
 def load_wallets():
     """Load wallets from the local file."""
     if os.path.exists(WALLET_FILE):
@@ -27,22 +33,20 @@ def load_wallets():
                 return json.loads(decrypted_data)
     return {}
 
-
+# Save wallets with encryption
 def save_wallets(wallets):
-    """Save wallets to the local file."""
+    """Save wallets to the local file with encryption."""
     encrypted_data = fernet.encrypt(json.dumps(wallets).encode()).decode()
     with open(WALLET_FILE, "w") as file:
         file.write(encrypted_data)
-
 
 # Load wallets at startup
 if "wallets" not in st.session_state:
     st.session_state.wallets = load_wallets()
 
-# Hashing for secure password storage
+# Hashing function for password storage
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
-
 
 # App Interface
 st.title("CRYPTO Platform")
