@@ -1,139 +1,95 @@
 import streamlit as st
-import pandas as pd
+import os
+import json
+from cryptography.fernet import Fernet
 import hashlib
-import time
-from datetime import datetime
 
-# Blockchain Implementation
-class Blockchain:
-    def __init__(self):
-        self.chain = []
-        self.pending_transactions = []
-        self.create_block(proof=1, previous_hash="0")  # Genesis block
+# Key for encryption (Generated only once)
+if "encryption_key" not in st.session_state:
+    st.session_state.encryption_key = Fernet.generate_key()
+fernet = Fernet(st.session_state.encryption_key)
 
-    def create_block(self, proof, previous_hash):
-        block = {
-            "index": len(self.chain) + 1,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "transactions": self.pending_transactions,
-            "proof": proof,
-            "previous_hash": previous_hash,
-        }
-        self.pending_transactions = []
-        self.chain.append(block)
-        return block
+# Local storage for wallets
+WALLET_FILE = "wallets.json"
 
-    def add_transaction(self, sender, receiver, amount):
-        transaction = {
-            "sender": sender,
-            "receiver": receiver,
-            "amount": amount,
-        }
-        self.pending_transactions.append(transaction)
-        return self.last_block["index"] + 1
+def load_wallets():
+    """Load wallets from the local file."""
+    if os.path.exists(WALLET_FILE):
+        with open(WALLET_FILE, "r") as file:
+            encrypted_data = file.read()
+            if encrypted_data:
+                decrypted_data = fernet.decrypt(encrypted_data.encode()).decode()
+                return json.loads(decrypted_data)
+    return {}
 
-    @staticmethod
-    def hash(block):
-        encoded_block = str(block).encode()
-        return hashlib.sha256(encoded_block).hexdigest()
+def save_wallets(wallets):
+    """Save wallets to the local file."""
+    encrypted_data = fernet.encrypt(json.dumps(wallets).encode()).decode()
+    with open(WALLET_FILE, "w") as file:
+        file.write(encrypted_data)
 
-    @property
-    def last_block(self):
-        return self.chain[-1]
-
-    def proof_of_work(self, previous_proof):
-        new_proof = 1
-        check_proof = False
-        while not check_proof:
-            hash_operation = hashlib.sha256(
-                str(new_proof**2 - previous_proof**2).encode()
-            ).hexdigest()
-            if hash_operation[:4] == "0000":  # Difficulty level
-                check_proof = True
-            else:
-                new_proof += 1
-        return new_proof
-
-# Initialize Blockchain
-if "blockchain" not in st.session_state:
-    st.session_state.blockchain = Blockchain()
-
-# Streamlit App
-st.title("Decentralized Financial Platform")
-st.subheader("Enhanced Security and Accessibility")
-
-# Wallet Generation
-st.sidebar.header("Wallet Management")
+# Load wallets at startup
 if "wallets" not in st.session_state:
-    st.session_state.wallets = {}
+    st.session_state.wallets = load_wallets()
 
+# Hashing for secure password storage
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+# App Interface
+st.title("CRYPTO Platform")
+st.sidebar.header("Wallet Management")
+
+# Tab for wallet creation
+st.sidebar.subheader("Create a New Wallet")
+username = st.sidebar.text_input("Username")
+password = st.sidebar.text_input("Password", type="password")
 wallet_name = st.sidebar.text_input("Wallet Name")
+
 if st.sidebar.button("Create Wallet"):
-    if wallet_name:
-        public_key = hashlib.sha256(f"{wallet_name}public".encode()).hexdigest()
-        private_key = hashlib.sha256(f"{wallet_name}private".encode()).hexdigest()
-        st.session_state.wallets[wallet_name] = {
-            "public_key": public_key,
-            "private_key": private_key,
-        }
-        st.sidebar.success(f"Wallet Created!\nPublic Key: {public_key}")
+    if username and password and wallet_name:
+        if username in st.session_state.wallets:
+            st.sidebar.error("Username already exists. Choose a different username.")
+        else:
+            public_key = hashlib.sha256(f"{wallet_name}public".encode()).hexdigest()
+            private_key = hashlib.sha256(f"{wallet_name}private".encode()).hexdigest()
+            st.session_state.wallets[username] = {
+                "password_hash": hash_password(password),
+                "wallet_name": wallet_name,
+                "public_key": public_key,
+                "private_key": private_key,
+            }
+            save_wallets(st.session_state.wallets)
+            st.sidebar.success(f"Wallet '{wallet_name}' created successfully!")
     else:
-        st.sidebar.error("Please enter a wallet name.")
+        st.sidebar.error("All fields are required.")
 
-# Wallets Overview
-if st.sidebar.checkbox("Show Wallets"):
-    st.sidebar.write(pd.DataFrame(st.session_state.wallets).T)
+# Tab for wallet login and access
+st.sidebar.subheader("Access Your Wallet")
+login_username = st.sidebar.text_input("Login Username", key="login_user")
+login_password = st.sidebar.text_input("Login Password", type="password", key="login_pass")
 
-# Add Transactions
-st.header("Simulate Transactions")
-sender = st.text_input("Sender Public Key")
-receiver = st.text_input("Receiver Public Key")
-amount = st.number_input("Transaction Amount", min_value=0.01, step=0.01)
-
-if st.button("Add Transaction"):
-    if sender and receiver and amount > 0:
-        st.session_state.blockchain.add_transaction(sender, receiver, amount)
-        st.success("Transaction added to the pool!")
+if st.sidebar.button("Login"):
+    wallets = st.session_state.wallets
+    if login_username in wallets:
+        if wallets[login_username]["password_hash"] == hash_password(login_password):
+            st.sidebar.success(f"Welcome back, {login_username}!")
+            st.session_state.active_wallet = wallets[login_username]
+        else:
+            st.sidebar.error("Incorrect password.")
     else:
-        st.error("All fields are required.")
+        st.sidebar.error("Username not found.")
 
-# Mining New Blocks
-st.header("Mine a New Block")
-if st.button("Mine Block"):
-    blockchain = st.session_state.blockchain
-    previous_block = blockchain.last_block
-    previous_proof = previous_block["proof"]
-    proof = blockchain.proof_of_work(previous_proof)
-    previous_hash = blockchain.hash(previous_block)
-    block = blockchain.create_block(proof, previous_hash)
-    st.success(f"Block Mined Successfully! Block Index: {block['index']}")
+# Display wallet details after login
+if "active_wallet" in st.session_state:
+    st.subheader("Your Wallet Details")
+    active_wallet = st.session_state.active_wallet
+    st.write(f"**Wallet Name:** {active_wallet['wallet_name']}")
+    st.write(f"**Public Key:** {active_wallet['public_key']}")
+    st.write(f"**Private Key:** {active_wallet['private_key']}")
 
-# Display Blockchain
-st.header("Blockchain Ledger")
-blockchain_data = []
-for block in st.session_state.blockchain.chain:
-    blockchain_data.append(
-        {
-            "Index": block["index"],
-            "Timestamp": block["timestamp"],
-            "Transactions": block["transactions"],
-            "Proof": block["proof"],
-            "Previous Hash": block["previous_hash"],
-        }
-    )
-st.write(pd.DataFrame(blockchain_data))
-
-# Performance Metrics
-st.header("Transaction Speed Test")
-if st.button("Run Speed Test"):
-    blockchain = st.session_state.blockchain
-    start_time = time.time()
-    for i in range(50):  # Simulating 50 transactions and blocks
-        blockchain.add_transaction(f"User{i}", f"User{i+1}", 100.0)
-        previous_block = blockchain.last_block
-        previous_proof = previous_block["proof"]
-        proof = blockchain.proof_of_work(previous_proof)
-        previous_hash = blockchain.hash(previous_block)
-        blockchain.create_block(proof, previous_hash)
-    end_time = time.time()
-    st.success(f"Processed 50 transactions in {end_time - start_time:.2f} seconds!")
+# Logout option
+if "active_wallet" in st.session_state:
+    if st.sidebar.button("Logout"):
+        del st.session_state.active_wallet
+        st.sidebar.success("Logged out successfully.")
