@@ -3,6 +3,7 @@ import os
 import json
 from cryptography.fernet import Fernet
 import hashlib
+import random
 
 # Key for encryption (Generated only once)
 if "encryption_key" not in st.session_state:
@@ -11,6 +12,10 @@ fernet = Fernet(st.session_state.encryption_key)
 
 # Local storage for wallets
 WALLET_FILE = "wallets.json"
+
+# Blockchain simulation
+MINING_REWARD = 10  # Tokens awarded for mining a block
+
 
 def load_wallets():
     """Load wallets from the local file."""
@@ -22,11 +27,13 @@ def load_wallets():
                 return json.loads(decrypted_data)
     return {}
 
+
 def save_wallets(wallets):
     """Save wallets to the local file."""
     encrypted_data = fernet.encrypt(json.dumps(wallets).encode()).decode()
     with open(WALLET_FILE, "w") as file:
         file.write(encrypted_data)
+
 
 # Load wallets at startup
 if "wallets" not in st.session_state:
@@ -35,6 +42,7 @@ if "wallets" not in st.session_state:
 # Hashing for secure password storage
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
+
 
 # App Interface
 st.title("CRYPTO Platform")
@@ -58,6 +66,8 @@ if st.sidebar.button("Create Wallet"):
                 "wallet_name": wallet_name,
                 "public_key": public_key,
                 "private_key": private_key,
+                "balance": 0,  # Start with zero balance
+                "transactions": [],  # Store transaction history
             }
             save_wallets(st.session_state.wallets)
             st.sidebar.success(f"Wallet '{wallet_name}' created successfully!")
@@ -75,6 +85,7 @@ if st.sidebar.button("Login"):
         if wallets[login_username]["password_hash"] == hash_password(login_password):
             st.sidebar.success(f"Welcome back, {login_username}!")
             st.session_state.active_wallet = wallets[login_username]
+            st.session_state.username = login_username
         else:
             st.sidebar.error("Incorrect password.")
     else:
@@ -86,7 +97,52 @@ if "active_wallet" in st.session_state:
     active_wallet = st.session_state.active_wallet
     st.write(f"**Wallet Name:** {active_wallet['wallet_name']}")
     st.write(f"**Public Key:** {active_wallet['public_key']}")
-    st.write(f"**Private Key:** {active_wallet['private_key']}")
+    st.write(f"**Balance:** {active_wallet['balance']} tokens")
+    st.write("**Transaction History:**")
+    if active_wallet["transactions"]:
+        for tx in active_wallet["transactions"]:
+            st.write(tx)
+    else:
+        st.write("No transactions yet.")
+
+    # Transaction functionality
+    st.subheader("Send Tokens")
+    recipient_username = st.text_input("Recipient Username")
+    amount = st.number_input("Amount to Send", min_value=1, step=1)
+    if st.button("Send"):
+        wallets = st.session_state.wallets
+        if recipient_username in wallets:
+            if active_wallet["balance"] >= amount:
+                # Deduct from sender
+                wallets[st.session_state.username]["balance"] -= amount
+                wallets[st.session_state.username]["transactions"].append(
+                    f"Sent {amount} tokens to {recipient_username}"
+                )
+                # Add to recipient
+                wallets[recipient_username]["balance"] += amount
+                wallets[recipient_username]["transactions"].append(
+                    f"Received {amount} tokens from {st.session_state.username}"
+                )
+                save_wallets(wallets)
+                st.session_state.wallets = wallets
+                st.success(f"Sent {amount} tokens to {recipient_username}")
+            else:
+                st.error("Insufficient balance!")
+        else:
+            st.error("Recipient not found!")
+
+    # Mining functionality
+    st.subheader("Mine Tokens")
+    if st.button("Mine"):
+        mining_reward = random.randint(1, MINING_REWARD)  # Randomized reward
+        wallets = st.session_state.wallets
+        wallets[st.session_state.username]["balance"] += mining_reward
+        wallets[st.session_state.username]["transactions"].append(
+            f"Mined {mining_reward} tokens"
+        )
+        save_wallets(wallets)
+        st.session_state.wallets = wallets
+        st.success(f"You mined {mining_reward} tokens!")
 
 # Logout option
 if "active_wallet" in st.session_state:
